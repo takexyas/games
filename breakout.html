@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta charset="UTF-8" />
+    <title>BREAKOUT</title>
+  </head>
+  <body>
+    <canvas id="pane" width="600" height="600"></canvas>
+    <div>
+      <label>
+	<input id="sound" type="checkbox" name="sound"
+	       onclick="game.turnSound();">
+	音再生
+      </label>
+      <label>
+	ボール数
+	<input id="ballsMax" type="text" name="ballsMax"
+	       size="2" maxlength="2" value="1">
+      </label>
+<!--
+      <label>
+	<input id="fit" type="checkbox" name="fit" checked>
+	ウィンドウに合わせる
+      </label>
+-->
+      <label>
+	<input type="button" name="apply" value="適用"
+	       onclick="game.restart();">
+      </label>
+    </div>
+    <audio id="fire">
+      <source src="audio/se_maoudamashii_system34.ogg">
+      <source src="audio/se_maoudamashii_system34.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="wall">
+      <source src="audio/se_maoudamashii_system40.ogg">
+      <source src="audio/se_maoudamashii_system40.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="bar">
+      <source src="audio/se_maoudamashii_system35.ogg">
+      <source src="audio/se_maoudamashii_system35.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="block">
+      <source src="audio/se_maoudamashii_system39.ogg">
+      <source src="audio/se_maoudamashii_system39.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="next">
+      <source src="audio/se_maoudamashii_system46.ogg">
+      <source src="audio/se_maoudamashii_system46.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="gameOver">
+      <source src="audio/se_maoudamashii_system29.ogg">
+      <source src="audio/se_maoudamashii_system29.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+<script>
+
+// キャンバスのコンテキスト
+var ctx = null;
+// ゲームオブジェクト
+var game = null;
+
+// デバッグモード
+//var debug_mode = true;
+
+//========================================
+// バーオブジェクト
+//========================================
+function Bar() {
+  // 位置X, Y
+  this.x;
+  this.y;
+  // 幅・高さ
+  this.width;
+  this.height;
+  // 速度
+  this.vx = 0;
+  // 加速
+  this.speed = 2;
+  // 減速
+  this.decelerate = 0.7;
+  // 色
+  this.color = 'green';
+  // 移動ボタン
+  this.left = false;
+  this.right = false;
+  this.fire = false;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // 幅・高さ
+    this.width = game.field.width * 0.2;
+    this.height = game.field.height * 0.02;
+    // 位置X, Y
+    this.x = game.field.width / 2;
+    this.y = game.field.height * 0.9;
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+    // 左移動
+    if (this.left) {
+      this.vx -= this.speed;
+    }
+    // 右移動
+    if (this.right) {
+      this.vx += this.speed;
+    }
+    // 移動していない場合
+    if (!this.left && !this.right) {
+      // 減速
+      this.vx *= this.decelerate;
+    }
+    // ボール発射
+    if (this.fire) {
+      game.balls.fire();
+    }
+
+    // 移動計算
+    this.x += this.vx;
+    // 左壁へ当たった場合
+    if (this.x - this.width / 2 <= 0) {
+      // 止まる
+      this.x = this.width / 2
+      this.vx = 0;
+    }
+    // 右壁へ当たった場合
+    if (this.x + this.width / 2 >= game.field.width) {
+      // 止まる
+      this.x = game.field.width - this.width / 2
+      this.vx = 0;
+    }
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // バー
+    ctx.beginPath();
+    ctx.strokeRect(this.x - this.width / 2, this.y,
+		   this.width, this.height);
+    ctx.stroke();
+    // 塗りつぶす
+    ctx.fillStyle = this.color;
+    ctx.fillRect(this.x - this.width / 2, this.y,
+		   this.width, this.height);
+  };
+
+  //----------------------------------------
+  // バーへの当たり判定
+  // 引数: 位置(X, Y)
+  //----------------------------------------
+  this.isHit = function(x, y) {
+    // X軸がバー範囲内の場合
+    if (this.x - this.width / 2 <= x
+	&& x <= this.x + this.width / 2) {
+      // Y軸が打面から高さ(と許容範囲内)の場合
+      if (this.y <= y
+	  && y <= this.y + this.height + this.height * 2) {
+	// 当たり
+	return true;
+      }
+    }
+    // それ以外は当たっていない
+    return false;
+  };
+}
+
+
+//========================================
+// ボール管理オブジェクト
+//========================================
+function Balls() {
+  // ボールの最大数
+  this.max;
+  // ボールリスト
+  this.list = [];
+  // 初期発射角度
+  this.angleIni = -90 * Math.PI / 180;
+  // 発射角度
+  this.angle = this.angleIni;
+  // 最大発射角度
+  this.angleMax = 45 * Math.PI / 180;
+  // 発射角速度
+  this.angleVelocity = 4 * Math.PI / 180;;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // ボールの最大数
+    this.max = game.ballsMax;
+
+    // リストを最大数まで
+    for (var i = 0; i < this.max; i++) {
+      // ボールが存在する場合
+      if (this.list[i]) {
+	// 初期化
+	this.list[i].init();
+      // 存在しない場合
+      } else {
+	// ボールを生成
+	var ball = new Ball();
+	ball.init();
+	// リストに追加
+	this.list.push(ball);
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+    // 発射準備状態ボール数
+    var readyCount = 0;
+
+    // 各々に対して
+    for (var i = 0; i < this.list.length; i++) {
+      // ボールの動き計算
+      this.list[i].move();
+      // ボールが発射準備状態の場合
+      if (this.list[i].ready) {
+	// カウントアップ
+	readyCount++;
+      }
+    }
+
+    // 発射準備状態の場合
+    if (readyCount > 0) {
+      // 発射角度の計算
+      this.angle += this.angleVelocity;
+      // 発射角度が範囲を越えている場合
+      if (this.angle < this.angleIni - this.angleMax
+	  || this.angleIni + this.angleMax < this.angle) {
+	// 発射角速度の方向を変える
+	this.angleVelocity *= -1;
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // 発射準備状態ボール数
+    var readyCount = 0;
+    // 発射準備状態ボール位置
+    var readyX, readyY, readyR;
+
+    // 各々に対して
+    for (var i = 0; i < this.list.length; i++) {
+      // ボールの描画
+      this.list[i].draw();
+      // ボールが発射準備状態の場合
+      if (this.list[i].ready) {
+	// 最初のみ
+	if (readyCount == 0) {
+	  // 発射準備状態ボール位置
+	  readyX = this.list[i].x;
+	  readyY = this.list[i].y;
+	  readyR = this.list[i].r;
+	}
+	// カウントアップ
+	readyCount++;
+      }
+    }
+
+    // 発射準備状態の場合
+    if (readyCount > 0) {
+      // セーブ
+      ctx.save();
+      // 軸変換
+      ctx.translate(readyX, readyY);
+
+      // 変数
+      var x1, x2, y1, y2
+      // 弧の長さ
+      var r = readyR * 6;
+      // 端に線を引く
+      ctx.beginPath();
+      x1 = (r + readyR) * Math.cos(this.angleIni - this.angleMax);
+      y1 = (r + readyR) * Math.sin(this.angleIni - this.angleMax);
+      x2 = (r - readyR) * Math.cos(this.angleIni - this.angleMax);
+      y2 = (r - readyR) * Math.sin(this.angleIni - this.angleMax);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      x1 = (r + readyR) * Math.cos(this.angleIni + this.angleMax);
+      y1 = (r + readyR) * Math.sin(this.angleIni + this.angleMax);
+      x2 = (r - readyR) * Math.cos(this.angleIni + this.angleMax);
+      y2 = (r - readyR) * Math.sin(this.angleIni + this.angleMax);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.stroke();
+      // 弧を描く
+      ctx.beginPath();
+      ctx.arc(0, 0, r,
+	      this.angleIni - this.angleMax, this.angleIni + this.angleMax);
+      ctx.stroke();
+      // 的を描く
+      ctx.beginPath();
+      ctx.arc(r * Math.cos(this.angle), r * Math.sin(this.angle),
+	      readyR, 0, Math.PI * 2);
+      ctx.stroke();
+      // リストア
+      ctx.restore();
+    }
+  };
+
+  //----------------------------------------
+  // ボール発射
+  //----------------------------------------
+  this.fire = function() {
+    // 各々に対して
+    for (var i = 0; i < this.list.length; i++) {
+      // 発射準備状態の場合
+      if (this.list[i].ready) {
+	// ボール発射
+	this.list[i].fire(this.angle);
+	// 処理終了
+	return;
+      }
+    }
+  };
+}
+
+
+//========================================
+// ボールオブジェクト
+//========================================
+function Ball() {
+  // 位置X, Y
+  this.x;
+  this.y;
+  // 速度X, Y
+  this.vx;
+  this.vy;
+  // 初速度X, Y
+  this.vxIni = 10;
+  this.vyIni = 10;
+  // 最大速度X, Y
+  this.vxMax;
+  this.vyMax;
+  // 半径
+  this.r;
+  // 色
+  this.color = 'yellow';
+  // 補正割合
+  this.shiftRate = 0.1;
+  // 発射準備状態
+  this.ready;
+
+  //----------------------------------------
+  // 初期化
+  // 引数: 位置(X, Y)
+  //----------------------------------------
+  this.init = function() {
+    // 半径
+    this.r = game.bar.width / 8;
+    // 位置X, Y
+    this.x = game.bar.x;
+    this.y = game.bar.y - this.r;
+    // 速度X, Y
+    this.vx = 0;
+    this.vy = 0;
+    // 最大速度X, Y
+    // ブロックを飛び越えない最大値
+    this.vxMax = Math.min(this.r * 2 - 1, game.field.widthBlock - 1);
+    this.vyMax = Math.min(this.r * 2 - 1, game.field.heightBlock - 1);
+    // 初速度X, Y
+    this.vxIni = Math.min(this.vxIni, this.vxMax);
+    this.vyIni = Math.min(this.vyIni, this.vyMax);
+    // 発射準備状態
+    this.ready = true;
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+    // 発射準備状態の場合
+    if (this.ready) {
+      // バー位置に合わせる
+      this.x = game.bar.x;
+      this.y = game.bar.y - this.r;
+      // 計算終了
+      return;
+    }
+
+    // 位置計算
+    this.x += this.vx;
+    this.y += this.vy;
+
+    // 壁に当たった場合
+    if (this.isHitWall()) {
+      // 音再生
+      game.play('wall');
+      // 計算終了
+      return;
+    }
+
+    // 判定位置X, Y
+    var x, y;
+    // ブロックオブジェクト
+    var block;
+    //____________________
+    // ボール上位置
+    x = this.x;
+    y = this.y - this.r;
+    // ブロックが存在する場合
+    block = game.field.getBlock(x, y);
+    if (block) {
+      // ブロックを消す
+      game.field.hitBlock(x, y);
+      // 速度を反転させる
+      this.reflect(x, y);
+      // 位置補正
+//      this.y = Math.ceil(y / game.field.heightBlock) * game.field.heightBlock + this.r;
+      // 計算終了
+      return;
+    }
+    //____________________
+    // ボール下位置
+    x = this.x;
+    y = this.y + this.r;
+    // ブロックが存在する場合
+    block = game.field.getBlock(x, y);
+    if (block) {
+      // ブロックを消す
+      game.field.hitBlock(x, y);
+      // 速度を反転させる
+      this.reflect(x, y);
+      // 位置補正
+//      this.y = Math.floor(y / game.field.heightBlock) * game.field.heightBlock - this.r;
+      // 計算終了
+      return;
+    }
+    //____________________
+    // ボール右位置
+    x = this.x + this.r;
+    y = this.y;
+    // ブロックが存在する場合
+    block = game.field.getBlock(x, y);
+    if (block) {
+      // ブロックを消す
+      game.field.hitBlock(x, y);
+      // 速度を反転させる
+      this.reflect(x, y);
+      // 位置補正
+//      this.x = Math.floor(x / game.field.widthBlock) * game.field.widthBlock - this.r;
+      // 計算終了
+      return;
+    }
+    //____________________
+    // ボール左位置
+    x = this.x - this.r;
+    y = this.y;
+    // ブロックが存在する場合
+    block = game.field.getBlock(x, y);
+    if (block) {
+      // ブロックを消す
+      game.field.hitBlock(x, y);
+      // 速度を反転させる
+      this.reflect(x, y);
+      // 位置補正
+//      this.x = Math.ceil(x / game.field.widthBlock) * game.field.widthBlock + this.r;
+      // 計算終了
+      return;
+    }
+
+    // バーに当たった場合
+    if (game.bar.isHit(this.x, this.y + this.r)) {
+      // バーの速度をちょっと加える
+      this.vx += game.bar.vx * this.shiftRate;
+      // 最大値を超えないよう補正
+      this.vx = Math.min(this.vx, this.vxMax);
+      // Y軸速度を反転させる
+      this.vy *= -1;
+      // 位置補正
+      this.y = game.bar.y - this.r;
+
+      // 音再生
+      game.play('bar');
+
+      // 計算終了
+      return;
+    }
+
+    // ボールが落ちた場合
+    if (this.isFall()) {
+      // ミスの数をカウントアップ
+      game.miss++;
+      // 初期化
+      this.init();
+      // 計算終了
+      return;
+    }
+  };
+
+  //----------------------------------------
+  // 反射(速度反転)
+  // 引数: 判定位置X, Y
+  //----------------------------------------
+  this.reflect = function(x, y) {
+    // 判定位置がX軸プラス方向で
+    if (this.x < x) {
+      // 進行方向がX軸プラス方向の場合
+      // (直進して当たった場合)
+      if (0 < this.vx) {
+	// X軸の進行方向を反転
+	this.vx *= -1;
+      // 進行方向がX軸マイナス方向の場合
+      // (横から当たった場合)
+      } else if (this.vx < 0) {
+	// Y軸の進行方向を反転
+	this.vy *= -1;
+      }
+    // 判定位置がX軸マイナス方向で
+    } else if (x < this.x) {
+      // 進行方向がX軸プラス方向の場合
+      // (横から当たった場合)
+      if (0 < this.vx) {
+	// Y軸の進行方向を反転
+	this.vy *= -1;
+      // 進行方向がX軸マイナス方向の場合
+      // (直進して当たった場合)
+      } else if (this.vx < 0) {
+	// X軸の進行方向を反転
+	this.vx *= -1;
+      }
+    }
+    // 判定位置がY軸プラス方向で
+    if (this.y < y) {
+      // 進行方向がY軸プラス方向の場合
+      // (直進して当たった場合)
+      if (0 < this.vy) {
+	// Y軸の進行方向を反転
+	this.vy *= -1;
+      // 進行方向がY軸マイナス方向の場合
+      // (横から当たった場合)
+      } else if (this.vy < 0) {
+	// X軸の進行方向を反転
+	this.vx *= -1;
+      }
+    // 判定位置がY軸マイナス方向で
+    } else if (y < this.y) {
+      // 進行方向がY軸プラス方向の場合
+      // (横から当たった場合)
+      if (0 < this.vy) {
+	// X軸の進行方向を反転
+	this.vx *= -1;
+      // 進行方向がY軸マイナス方向の場合
+      // (直進して当たった場合)
+      } else if (this.vy < 0) {
+	// Y軸の進行方向を反転
+	this.vy *= -1;
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // 円
+    ctx.beginPath();
+    ctx.arc(this.x, this.y, this.r, 0, Math.PI * 2);
+    ctx.stroke();
+    // 塗りつぶす
+    ctx.fillStyle = this.color;
+    ctx.fill();
+  };
+
+  //----------------------------------------
+  // 壁に当たったか確認
+  //----------------------------------------
+  this.isHitWall = function() {
+    // 右壁
+    if (game.field.width <= this.x + this.r) {
+      // X軸速度を反転させる
+      this.vx *= -1;
+      // 補正
+      this.x = game.field.width - this.r;
+      // 当たったとして戻る
+      return true;
+    }
+    // 左壁
+    if (this.x - this.r <= 0) {
+      // X軸速度を反転させる
+      this.vx *= -1;
+      // 補正
+      this.x = this.r;
+      // 当たったとして戻る
+      return true;
+    }
+    // 上壁
+    if (this.y - this.r <= 0) {
+      // Y軸速度を反転させる
+      this.vy *= -1;
+      // 補正
+      this.y = this.r;
+      // 当たったとして戻る
+      return true;
+    }
+    // 当たっていないとして戻る
+    return false;
+  };
+
+  //----------------------------------------
+  // ミス判定
+  //----------------------------------------
+  this.isFall = function() {
+    // 範囲外の場合
+    if (game.field.height < this.y + this.r) {
+	// ミス
+	return true;
+    }
+    // それ以外はミスでない
+    return false;
+  };
+
+  //----------------------------------------
+  // 発射
+  // 引数: 角度
+  //----------------------------------------
+  this.fire = function(angle) {
+    // 速度X, Y
+    this.vx = this.vxIni * Math.cos(angle);
+    this.vy = -this.vyIni;
+    // 発射
+    this.ready = false;
+
+    // 音再生
+    game.play('fire');
+  };
+}
+
+
+//========================================
+// ブロックオブジェクト
+//========================================
+function Block(strength) {
+  // 耐久性
+  this.strength = strength;
+  // 色
+  this.color = 'rgba(' + Math.floor(Math.random() * 255)
+		 + ',' + Math.floor(Math.random() * 255)
+		 + ',' + Math.floor(Math.random() * 255)
+		 + ',' + Math.random() + ')';
+}
+
+
+//========================================
+// フィールドオブジェクト
+//========================================
+function Field() {
+  // X軸・Y軸サイズ
+  this.sizeX = 10;
+  this.sizeY = 10;
+  // ブロック
+  this.block;
+  // ブロックの幅・高さ
+  this.widthBlock;
+  this.heightBlock;
+  // フィールド幅・高さ
+  this.width;
+  this.height;
+  // 左上位置
+  this.x;
+  this.y;
+  // ブロック存在率
+  // 耐久性0(ブロックなし)のブロック存在率
+  // 耐久性1のブロック存在率
+  // 耐久性2のブロック存在率 ...
+  // (最後は0以上1未満の外[確率範囲外]にする)
+  this.existRate = [0.5, 0.8, 0.5, 1];
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // フィールド幅・高さ
+    this.width = game.width * 0.9;
+    this.height = game.height * 0.9;
+    // ブロックの幅・高さ
+    this.widthBlock = this.width / this.sizeX;
+    this.heightBlock = (this.height / this.sizeY) / 2;
+
+    // 左上位置の計算
+    this.x = game.width / 2 - this.width / 2;
+    this.y = game.height / 2 - this.height / 2;
+
+    // ブロック配列の作成
+    this.block = new Array(this.sizeY);
+    // 各ブロックに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      this.block[i] = new Array(this.sizeX);
+      // さらに各ブロックに対して
+      for (var j = 0; j < this.sizeX; j++) {
+        // ブロックを初期化
+	this.block[i][j] = null;
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // セーブ
+    ctx.save();
+    // 軸変換
+    ctx.translate(this.x, this.y);
+    // 枠
+    ctx.strokeRect(0, 0, this.width, this.height);
+
+    // 各ブロックに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // ブロックが存在する場合
+	if (this.block[i][j]) {
+	  // ブロックを描画
+	  this.drawBlock(i, j, this.block[i][j].color);
+	}
+      }
+    }
+    // ボール描画
+    game.balls.draw();
+    // バー描画
+    game.bar.draw();
+
+    // リストア
+    ctx.restore();
+  };
+
+  //----------------------------------------
+  // ブロックを描画
+  // 引数: フィールドのブロック位置と色
+  //----------------------------------------
+  this.drawBlock = function(i, j, color) {
+    // 位置を計算
+    var x = j * this.widthBlock;
+    var y = i * this.heightBlock;
+    // 色設定
+    ctx.fillStyle = color;
+    // 塗りつぶす
+    ctx.fillRect(x, y, this.widthBlock, this.heightBlock);
+    // ブロックの枠線
+    ctx.strokeRect(x, y, this.widthBlock, this.heightBlock);
+    // ブロックの内側にブロックっぽく見える線
+    ctx.strokeRect(x + this.widthBlock * 0.2,
+		   y + this.heightBlock * 0.2,
+		   this.widthBlock * 0.6,
+		   this.heightBlock * 0.6);
+    // 耐久性で色分け
+    switch(this.block[i][j].strength) {
+      case 2:
+	// 銀
+	ctx.fillStyle = 'silver';
+	ctx.fillRect(x + this.widthBlock * 0.2,
+		     y + this.heightBlock * 0.2,
+		     this.widthBlock * 0.6,
+		     this.heightBlock * 0.6);
+	break;
+      case 3:
+	// 金
+	ctx.fillStyle = 'gold';
+	ctx.fillRect(x + this.widthBlock * 0.2,
+		     y + this.heightBlock * 0.2,
+		     this.widthBlock * 0.6,
+		     this.heightBlock * 0.6);
+	break;
+      default:
+	// その他は何もしない
+	break;
+    }
+  };
+
+  //----------------------------------------
+  // ブロックのクリア
+  //----------------------------------------
+  this.clearBlock = function() {
+    // 各ブロックの場所に対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // ブロックを初期化
+	this.block[i][j] = null;
+      }
+    }
+  };
+
+  //----------------------------------------
+  // ブロックのセット
+  //----------------------------------------
+  this.setBlock = function() {
+    // 耐久性
+    var strength = 0;
+    // 各ブロックの場所に対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// 耐久性初期化
+	strength = 0;
+	// ランダム数値で耐久性を決定
+	while (0 <= this.existRate[strength] && this.existRate[strength] < 1
+	       && this.existRate[strength] < Math.random()) {
+	    strength++;
+	}
+	// 耐久性が0より大きい時
+	if (strength > 0) {
+	  // ブロックを生成
+	  this.block[i][j] = new Block(strength);
+  	}
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 指定位置のブロックオブジェクト取得
+  // 引数: 位置(X, Y)
+  //----------------------------------------
+  this.getBlock = function(x, y) {
+    // ブロック位置
+    var posX = Math.floor(x / this.widthBlock);
+    var posY = Math.floor(y / this.heightBlock);
+    // ブロックがない場合
+    if (posX < 0 || this.sizeX <= posX ||
+	posY < 0 || this.sizeY <= posY) {
+      // ブロックなし
+      return null;
+    }
+    // ブロックを返す
+    return this.block[posY][posX];
+  };
+
+  //----------------------------------------
+  // 残りブロック数をカウント
+  //----------------------------------------
+  this.checkBlock = function() {
+    // カウンタ
+    var count = 0;
+    // 各ブロックの場所に対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// ブロックが存在する場合
+	if (this.block[i][j]) {
+	  // カウントアップ
+	  count++;
+	}
+      }
+    }
+    // 残りブロック数を返す
+    return count;
+  };
+
+  //----------------------------------------
+  // ブロックを消す
+  // 引数: 位置X, Y
+  //----------------------------------------
+  this.hitBlock = function(x, y) {
+    // ブロック位置
+    var posX = Math.floor(x / this.widthBlock);
+    var posY = Math.floor(y / this.heightBlock);
+    // ブロックの耐久性を減らす
+    this.block[posY][posX].strength--;
+    // 耐久性が0以下の場合
+    if (this.block[posY][posX].strength <= 0) {
+      // ブロックを削除
+      this.block[posY][posX] = null;
+    }
+    // ヒット数をカウントアップ
+    game.hits++;
+
+    // 音再生
+    game.play('block');
+  };
+}
+
+
+//========================================
+// ゲームオブジェクト
+//========================================
+function Game() {
+  // 幅と高さ
+  this.width;
+  this.height;
+  // タイマーID
+  this.cmTID;
+  // タイムステップ(ミリセカンド)
+  this.timeStep = 50;
+  // フレームレート(fps)
+  this.frameRate = 1000 / this.timeStep;
+  // ステージ
+  this.stage = 1;
+  // ブロックに当たった数
+  this.hits = 0;
+  // ミスの数
+  this.miss = 0;
+  // 残りブロック数
+  this.rest;
+  // オブジェクト
+  this.field = null;
+  this.block = null;
+  this.balls = null;
+  this.bar = null;
+  // ゲームオーバー
+  this.gameOver = false;
+  // ボールの最大数
+  this.ballsMax;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // ステージ
+    this.stage = 1;
+    // ブロックに当たった数
+    this.hits = 0;
+    // ミスの数
+    this.miss = 0;
+    // ゲームオーバー
+    this.gameOver = false;
+
+    // 幅と高さ
+    this.width = ctx.canvas.width;
+    this.height = ctx.canvas.height;
+
+    // フィールドオブジェクト
+    this.field = new Field();
+    this.field.init();
+    // バーオブジェクト
+    this.bar = new Bar();
+    this.bar.init();
+    // ボール管理オブジェクト
+    this.balls = new Balls();
+    this.balls.init();
+
+    // ブロックのセット
+    this.field.setBlock();
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+    // ボール移動
+    this.balls.move();
+    // バー移動
+    this.bar.move();
+
+    // 残りブロック数をカウント
+    this.rest = this.field.checkBlock();
+    // クリアの場合
+    if (this.rest <= 0) {
+      // ステージをカウントアップ
+      this.stage++;
+      // 最初から
+      this.field.setBlock();
+      // ボール初期化
+      this.balls.init();
+
+      // 音再生
+      this.play('next');
+    }
+  };
+
+  //----------------------------------------
+  // テキスト描画
+  //----------------------------------------
+  this.drawText = function() {
+    // 文字色
+    ctx.fillStyle = 'black';
+    // ステージ
+    ctx.fillText('Stage: ' + this.stage,
+		 this.width * 0.1, this.height * 0.02);
+    // ブロックに当たった数
+    ctx.fillText('Hits: ' + this.hits,
+		 this.width * 0.3, this.height * 0.02);
+    // ミスの数
+    ctx.fillText('Miss: ' + this.miss,
+		 this.width * 0.5, this.height * 0.02);
+    // デバッグモードの場合
+    if ((typeof debug_mode) != 'undefined') {
+      var text = 'debug_mode: ' + 'Rest: ' + this.rest;
+      ctx.fillText(text, 10, this.height * 0.98);
+    }
+    // ゲームオーバー
+    if (this.gameOver) {
+      ctx.save();
+      ctx.font = '48pt sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'red';
+      ctx.fillText('GAME OVER', this.width / 2, this.height / 2, this.width);
+      ctx.strokeText('GAME OVER', this.width / 2, this.height / 2, this.width);
+      ctx.restore();
+      // 音再生
+      game.play('gameOver');
+    }
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // 画面クリア
+    ctx.clearRect(0, 0, this.width, this.height);
+    // フィールド描画
+    this.field.draw();
+    // テキスト描画
+    this.drawText();
+  };
+
+  //----------------------------------------
+  // 音再生
+  // 引数: タグID
+  //----------------------------------------
+  this.play = function(id) {
+    // 音再生しない場合
+    if (!this.sound) {
+      // 何もしない
+      return;
+    }
+
+    // ID取得
+    var element = document.getElementById(id);
+
+    // 停止していない場合
+    if (!element.paused) {
+      // 停止
+      element.pause();
+      // 最初から
+      element.currentTime = 0;
+    }
+    // 再生
+    element.play();
+  };
+
+  //----------------------------------------
+  // 全て更新
+  //----------------------------------------
+  this.updateAll = function() {
+    // setTimeoutで呼び出されるためthisではないことに注意
+
+    // 動き計算
+    game.move();
+    // 描画
+    game.draw();
+
+    // タイマークリア
+    clearTimeout(game.cmTID);
+    // ゲームオーバーでない場合
+    if (!game.gameOver) {
+      game.cmTID = setTimeout(game.updateAll, game.timeStep);
+    }
+  };
+
+  //----------------------------------------
+  // 設定
+  //----------------------------------------
+  this.setting = function() {
+    // ボールの最大数
+    var max = document.getElementById('ballsMax').value;
+    // 0より大きい場合
+    if (max > 0) {
+      // 設定
+      this.ballsMax = max;
+    // その他の場合
+    } else {
+      // 表示を元に戻す
+      document.getElementById('ballsMax').value = this.ballsMax;
+    }
+
+    // ウィンドウに合わせる
+//    if (document.getElementById('fit').checked) {
+      // 幅と高さの調整
+      var length = Math.min(window.innerWidth - 50, window.innerHeight - 50);
+      ctx.canvas.width = length;
+      ctx.canvas.height = length;
+//    }
+
+    // 音再生
+    this.turnSound();
+  };
+
+  //----------------------------------------
+  // 音再生
+  //----------------------------------------
+  this.turnSound = function() {
+    // 
+    this.sound =document.getElementById('sound').checked;
+
+    // 戻り値
+    return false;
+  };
+
+  //----------------------------------------
+  // リスタート
+  //----------------------------------------
+  this.restart = function() {
+    // 設定
+    this.setting();
+    // 初期化
+    this.init();
+    // 実行
+    this.updateAll();
+
+    // 戻り値
+    return false;
+  };
+}
+
+
+//========================================
+// イベント
+//========================================
+// キーボードを押した時
+function keyDown(evt) {
+  // 左矢印・aキー
+  if (evt.keyCode == 37 || evt.keyCode == 65) {
+    game.bar.left = true;
+    evt.preventDefault();
+  }
+  // 上矢印・wキー
+  if (evt.keyCode == 38 || evt.keyCode == 87) {
+    game.bar.fire = true;
+    evt.preventDefault();
+  }
+  // 右矢印・dキー
+  if (evt.keyCode == 39 || evt.keyCode == 68) {
+    game.bar.right = true;
+    evt.preventDefault();
+  }
+  // 下矢印
+  if (evt.keyCode == 40) {
+    // 何もしない
+    evt.preventDefault();
+  }
+};
+
+// キーボードを離した時
+function keyUp(evt) {
+  // 左矢印・aキー
+  if (evt.keyCode == 37 || evt.keyCode == 65) {
+    game.bar.left = false;
+    evt.preventDefault();
+  }
+  // 上矢印・wキー
+  if (evt.keyCode == 38 || evt.keyCode == 87) {
+    game.bar.fire = false;
+    evt.preventDefault();
+  }
+  // 右矢印・dキー
+  if (evt.keyCode == 39 || evt.keyCode == 68) {
+    game.bar.right = false;
+    evt.preventDefault();
+  }
+  // 下矢印
+  if (evt.keyCode == 40) {
+    // 何もしない
+    evt.preventDefault();
+  }
+  // escキー
+  if (evt.keyCode == 27) {
+    game.gameOver = true;
+    evt.preventDefault();
+  }
+};
+
+
+//========================================
+// メイン
+//========================================
+function main() {
+  // キャンバスのコンテキスト
+  ctx = document.getElementById('pane').getContext('2d');
+
+  // オブジェクト生成
+  game = new Game();
+  // 設定
+  game.setting();
+  // 初期化
+  game.init();
+
+  // イベント登録
+  window.addEventListener('keydown', keyDown, false);
+  window.addEventListener('keyup', keyUp, false);
+
+  // 実行
+  game.updateAll();
+}
+
+//========================================
+// ページがロードされたときに実行
+//========================================
+window.addEventListener('load', main, false);
+
+</script>
+</body>
+</html>

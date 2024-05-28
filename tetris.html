@@ -1,0 +1,1344 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta charset="UTF-8" />
+    <title>TETRIS</title>
+  </head>
+  <body>
+    <canvas id="pane" width="600" height="600"></canvas>
+    <div>
+      <label>
+	<input id="sound" type="checkbox" name="sound"
+	       onclick="game.turnSound();">
+	音再生
+      </label>
+      <label>
+	<input id="gravity" type="checkbox" name="gravity"
+	       onclick="game.turnGravity();">
+	落下させる
+      </label>
+      /
+      <label>
+	ブロック横数
+	<input id="sizeX" type="text" name="sizeX"
+	       size="2" maxlength="2" value="10">
+      </label>
+      <label>
+	ブロック縦数
+	<input id="sizeY" type="text" name="sizeY"
+	       size="2" maxlength="2" value="20">
+      </label>
+      <label>
+	ネクストブロック数
+	<input id="maxNext" type="text" name="maxNext"
+	       size="1" maxlength="1" value="1">
+      </label>
+<!--
+      <label>
+	<input id="fit" type="checkbox" name="fit" checked>
+	ウィンドウに合わせる
+      </label>
+-->
+      <label>
+	<input type="button" name="apply" value="適用"
+	       onclick="game.restart();">
+      </label>
+    </div>
+    <audio id="move">
+      <source src="audio/se_maoudamashii_instruments_drum1_hat.ogg">
+      <source src="audio/se_maoudamashii_instruments_drum1_hat.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="landing">
+      <source src="audio/se_maoudamashii_instruments_drum1_bassdrum1.ogg">
+      <source src="audio/se_maoudamashii_instruments_drum1_bassdrum1.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="rotR">
+      <source src="audio/se_maoudamashii_onepoint25.ogg">
+      <source src="audio/se_maoudamashii_onepoint25.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="rotL">
+      <source src="audio/se_maoudamashii_onepoint26.ogg">
+      <source src="audio/se_maoudamashii_onepoint26.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="deleteLine">
+      <source src="audio/se_maoudamashii_magical05.ogg">
+      <source src="audio/se_maoudamashii_magical05.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="deleteLine4">
+      <source src="audio/se_maoudamashii_magical12.ogg">
+      <source src="audio/se_maoudamashii_magical12.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+    <audio id="gameOver">
+      <source src="audio/se_maoudamashii_instruments_drum1_cymbal.ogg">
+      <source src="audio/se_maoudamashii_instruments_drum1_cymbal.mp3">
+      <p>このブラウザでは音声が再生できません</p>
+    </audio>
+<script>
+
+// キャンバスのコンテキスト
+var ctx = null;
+// ゲームオブジェクト
+var game = null;
+
+// デバッグモード
+//var debug_mode = true;
+
+//========================================
+// セルオブジェクト
+// 引数: 色
+//========================================
+function Cell(color) {
+  // 色
+  this.color = color;
+  // デバッグモード
+  if ((typeof debug_mode) != 'undefined') {
+    // 色をランダムに
+    this.color = 'rgba(' + Math.floor(Math.random() * 255)
+		   + ',' + Math.floor(Math.random() * 255)
+		   + ',' + Math.floor(Math.random() * 255)
+		   + ',' + Math.random() + ')';
+  }
+}
+
+
+//========================================
+// ブロック管理オブジェクト
+//========================================
+function Blocks() {
+  // ブロックの最大数
+  this.max = 2;
+  // ブロックリスト
+  this.list;
+  // ネクストブロック左上位置
+  this.posXnext;
+  this.posYnext;
+  // ネクストブロックX軸・Y軸サイズ
+  this.sizeXnext;
+  this.sizeYnext;
+  // 移動ボタン
+  this.left = false;
+  this.right = false;
+  this.down = false;
+  this.rotL = false;
+  this.rotR = false;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // ブロックの最大数
+    this.max = game.maxNext + 1;
+    // ブロックリスト
+    this.list = [];
+    // ブロックの作成
+    for (var num = 0; num < this.max; num++) {
+      // ブロック生成
+      this.next();
+    }
+    // ネクストブロックX軸・Y軸サイズ
+    this.sizeXnext = game.height * 0.1 / 4;
+    this.sizeYnext = this.sizeXnext;
+    // ネクストブロック左上位置
+    this.posXnext = (game.width -
+		     this.sizeYnext * 4 * (this.list.length - 1)) / 2;
+    this.posYnext = 0;
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+    // 戻り値
+    var ret;
+
+    // 下移動
+    if (this.down) {
+      ret = this.shift(1, 0);
+      // ゲームオーバーの場合
+      if (this.gameOver) {
+	// すぐに終了
+	return;
+      }
+    }
+    // 左移動
+    if (this.left) {
+      ret = this.shift(0, -1);
+      // 可能なら
+      if (ret) {
+	// 音再生
+	game.play('move');
+      }
+    }
+    // 右移動
+    if (this.right) {
+      ret = this.shift(0, 1);
+      // 可能なら
+      if (ret) {
+	// 音再生
+	game.play('move');
+      }
+    }
+    // 左回転
+    if (this.rotL) {
+      ret = this.rotate(3);
+      // 連続抑制
+      this.rotL = false;
+      // 可能なら
+      if (ret) {
+	// 音再生
+	game.play('rotL');
+      }
+    }
+    // 右回転
+    if (this.rotR) {
+      ret = this.rotate(1);
+      // 連続抑制
+      this.rotR = false;
+      // 可能なら
+      if (ret) {
+	// 音再生
+	game.play('rotR');
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // 現在のブロックを描画
+    this.list[0].draw();
+
+    // 枠
+    ctx.strokeRect(this.posXnext,
+		   this.posYnext,
+		   this.sizeXnext * 4 * (this.list.length - 1),
+		   this.sizeYnext * 4);
+
+    // 各ブロックに対して
+    for (i = 1; i < this.list.length; i++) {
+      // ネクストブロックを描画
+      this.list[i].drawNext(this.posXnext + this.sizeXnext * 4 * (i - 1),
+			    this.posYnext,
+			    this.sizeXnext,
+			    this.sizeYnext);
+    }
+  };
+
+  //----------------------------------------
+  // 次のブロックを生成
+  //----------------------------------------
+  this.next = function() {
+    // ブロックを生成
+    var block = new Block();
+    // 初期化
+    block.init();
+
+    // ブロックリストに登録
+    this.list.push(block);
+  };
+
+  //----------------------------------------
+  // ブロックを移動
+  // 引数: 移動する相対位置y, x
+  //----------------------------------------
+  this.shift = function(y, x) {
+    // 戻り値
+    var ret;
+
+    // 移動可能かチェック
+    ret = this.list[0].canShift(y, x);
+    // 移動可能な場合
+    if (ret) {
+      // 移動
+      this.list[0].posY += y;
+      this.list[0].posX += x;
+      // 戻り値
+      return ret;
+    }
+
+    // 移動不可能で下へ移動できない場合
+    if (y > 0) {
+      // ブロックをフィールドに固定
+      this.list[0].fixing();
+      // ラインチェック
+      game.field.checkLines();
+      // ブロックリストから削除
+      this.list.shift();
+      // ブロック生成
+      this.next();
+      // 音再生
+      game.play('landing');
+
+      // 既にセルが存在するかチェック
+      ret = this.list[0].canShift(0, 0);
+      // 既にセルが存在する場合
+      if (!ret) {
+	// ゲームオーバー
+	game.gameOver = true;
+	// 戻り値
+	return ret;
+      }
+    }
+
+    // 戻り値
+    return ret;
+  };
+
+  //----------------------------------------
+  // ブロックを回転
+  // 引数: 回転方向
+  //----------------------------------------
+  this.rotate = function(rot) {
+    // 回転
+    this.list[0].rotate(rot);
+
+    // 回転可能でない場合
+    if (!this.list[0].canRotate()) {
+      // 回転不可として戻る
+      return false;
+    }
+
+    // 回転を適用
+    this.list[0].applyRotate();
+
+    // 回転可能として戻る
+    return true;
+  };
+}
+
+
+//========================================
+// ブロックオブジェクト
+//========================================
+function Block() {
+  // X軸・Y軸サイズ
+  this.sizeX = 5;
+  this.sizeY = this.sizeX;
+  // 幅(回転時必要)
+  this.cellWidth;
+  // ブロックタイプ
+  this.type;
+  // 左上位置
+  this.posX = 0;
+  this.posY = 0;
+  // セル
+  this.cell;
+  // 回転セル
+  this.cellRotate;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // セル配列の作成
+    this.cell = new Array(this.sizeY);
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      this.cell[i] = new Array(this.sizeX);
+      // さらに各セルに対して
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルを初期化
+	this.cell[i][j] = null;
+      }
+    }
+
+    // 回転セル配列の作成
+    this.cellRotate = new Array(this.sizeY);
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      this.cellRotate[i] = new Array(this.sizeX);
+      // さらに各セルに対して
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルを初期化
+	this.cellRotate[i][j] = null;
+      }
+    }
+
+    // 新しいブロックを生成
+    this.new();
+
+    // 回転位置をランダムに選択
+    var rot = Math.floor(Math.random() * 4);
+    // 回転
+    this.rotate(rot);
+    // 回転を反映
+    this.applyRotate();
+
+    // 左位置
+    var left = this.getLeft();
+    // X軸はランダム位置
+    this.posX = Math.floor(
+		 (game.field.sizeX - this.getRight() + left) * Math.random())
+		- left;
+    // Y軸は最上段へ
+    this.posY = -this.getTop();
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // セーブ
+    ctx.save();
+    // 軸変換
+    ctx.translate(game.field.posX, game.field.posY);
+
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルが存在する場合
+	if (this.cell[i][j]) {
+	  // フィールドにセルを描画
+	  game.field.drawCell(i + this.posY, j + this.posX,
+			      this.cell[i][j].color);
+	}
+      }
+    }
+
+    // リストア
+    ctx.restore();
+  };
+
+  //----------------------------------------
+  // ネクストブロック描画
+  // 引数: X・Y位置、X・Yサイズ
+  //----------------------------------------
+  this.drawNext = function(posX, posY, sizeX, sizeY) {
+    // セーブ
+    ctx.save();
+    // 軸変換
+    ctx.translate(posX, posY);
+
+    // ブロックの最上段Y位置
+    var top = this.getTop();
+    // ブロックの最左X位置
+    var left = this.getLeft();
+    // 各セルに対して
+    for (var i = top; i < this.sizeY; i++) {
+      for (var j = left; j < this.sizeX; j++) {
+        // セルが存在する場合
+	if (this.cell[i][j]) {
+	  var x = (j - left) * sizeX;
+	  var y = (i - top) * sizeY;
+	  // 色設定
+	  ctx.fillStyle = this.cell[i][j].color;
+	  // 塗りつぶす
+	  ctx.fillRect(x, y, sizeX, sizeY);
+	  // セルの枠線
+	  ctx.strokeRect(x, y, sizeX, sizeY);
+	  // セルの内側にブロックっぽく見える線
+	  ctx.strokeRect(x + sizeX * 0.2, y + sizeY * 0.2,
+			 sizeX * 0.6, sizeY * 0.6);
+	}
+      }
+    }
+
+    // リストア
+    ctx.restore();
+  };
+
+  //----------------------------------------
+  // 新しいブロックを生成
+  //----------------------------------------
+  this.new = function() {
+    // 色
+    var color;
+
+    // セルをクリア
+    this.clear(this.cell);
+    // 7種類のブロックからランダムに選択
+    switch (Math.floor(Math.random() * 7)) {
+      case 0:
+	// I型 水
+	this.type = 'I';
+	color = 'rgb(0, 255, 255)';
+	this.cell[0][2] = new Cell(color);
+	this.cell[1][2] = new Cell(color);
+	this.cell[2][2] = new Cell(color);
+	this.cell[3][2] = new Cell(color)
+	this.cellWidth = 5;
+	break;
+      case 1:
+	// O型 黄
+	this.type = 'O';
+	color = 'rgb(255, 255, 0)';
+	this.cell[0][0] = new Cell(color);
+	this.cell[0][1] = new Cell(color);
+	this.cell[1][0] = new Cell(color);
+	this.cell[1][1] = new Cell(color);
+	this.cellWidth = 2;
+	break;
+      case 2:
+	// S型 緑
+	this.type = 'S';
+	color = 'rgb(0, 255, 0)';
+	this.cell[0][1] = new Cell(color);
+	this.cell[0][2] = new Cell(color);
+	this.cell[1][0] = new Cell(color);
+	this.cell[1][1] = new Cell(color);
+	this.cellWidth = 3;
+	break;
+      case 3:
+	// Z型 赤
+	this.type = 'Z';
+	color = 'rgb(255, 0, 0)';
+	this.cell[0][0] = new Cell(color);
+	this.cell[0][1] = new Cell(color);
+	this.cell[1][1] = new Cell(color);
+	this.cell[1][2] = new Cell(color);
+	this.cellWidth = 3;
+	break;
+      case 4:
+	// J型 青
+	this.type = 'J';
+	color = 'rgb(0, 0, 255)';
+	this.cell[0][2] = new Cell(color);
+	this.cell[1][2] = new Cell(color);
+	this.cell[2][2] = new Cell(color);
+	this.cell[2][1] = new Cell(color);
+	this.cellWidth = 5;
+	break;
+      case 5:
+	// L型 橙
+	this.type = 'L';
+	color = 'rgb(255, 192, 0)';
+	this.cell[0][2] = new Cell(color);
+	this.cell[1][2] = new Cell(color);
+	this.cell[2][2] = new Cell(color);
+	this.cell[2][3] = new Cell(color);
+	this.cellWidth = 5;
+	break;
+      case 6:
+	// T型 紫
+	this.type = 'T';
+	color = 'rgb(255, 0, 255)';
+	this.cell[0][1] = new Cell(color);
+	this.cell[1][1] = new Cell(color);
+	this.cell[2][1] = new Cell(color);
+	this.cell[1][0] = new Cell(color);
+	this.cellWidth = 3;
+	break;
+      default:
+	break;
+    }
+  };
+
+  //----------------------------------------
+  // ブロックをクリア
+  // 引数: セル配列
+  //----------------------------------------
+  this.clear = function(cell) {
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// セルが存在する場合
+	if (cell[i][j]) {
+	  // セルをクリア
+	  cell[i][j] = null;
+	}
+      }
+    }
+  };
+
+  //----------------------------------------
+  // ブロックを回転
+  // 引数: 回転位置
+  //----------------------------------------
+  this.rotate = function(rot) {
+    // コピー先をクリア
+    this.clear(this.cellRotate);
+
+    // I型・S型・Z型の場合は回転を固定
+    if (this.type == 'I' || this.type == 'S' || this.type == 'Z') {
+      // 縦の場合
+      if (this.isVertical()) {
+	// 左回転
+	rot = 3;
+      } else {
+	// 右回転
+	rot = 1;
+      }
+    }
+
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// セルが存在する場合
+	if (this.cell[i][j]) {
+	  // 回転位置により分岐
+	  switch (rot) {
+	    case 1:
+	      // 右回転
+	      this.cellRotate[j][(this.cellWidth - 1) - i] = this.cell[i][j];
+	      break;
+	    case 2:
+	      // 180度回転
+	      this.cellRotate[(this.cellWidth - 1) - i][(this.cellWidth - 1) - j]
+			= this.cell[i][j];
+	      break;
+	    case 3:
+	      // 左回転
+	      this.cellRotate[(this.cellWidth - 1) - j][i] = this.cell[i][j];
+	      break;
+	    case 0:
+	    default:
+	      // そのまま
+	      this.cellRotate[i][j] = this.cell[i][j];
+	      break;
+	  }
+	}
+      }
+    }
+  };
+
+  //----------------------------------------
+  // ブロックが縦かどうかの確認
+  //----------------------------------------
+  this.isVertical = function() {
+    // 縦・横の開始位置、終了位置
+    var startX = this.sizeX;
+    var startY = this.sizeY;
+    var endX = 0;
+    var endY = 0;
+
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// セルが存在する場合
+	if (this.cell[i][j]) {
+	  // 横開始位置
+	  if (j < startX) {
+	    startX = j;
+	  }
+	  // 横終了位置
+	  if (j > endX) {
+	    endX = j;
+	  }
+	  // 縦開始位置
+	  if (i < startY) {
+	    startY = i;
+	  }
+	  // 縦終了位置
+	  if (i > endY) {
+	    endY = i;
+	  }
+	}
+      }
+    }
+
+    // 横幅が小さい場合
+    if (endX - startX < endY - startY) {
+      // 縦
+      return true;
+    } else {
+      // 横
+      return false;
+    }
+  };
+
+  //----------------------------------------
+  // 回転を適用
+  //----------------------------------------
+  this.applyRotate = function() {
+    // コピー先をクリア
+    this.clear(this.cell);
+
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// セルが存在する場合
+	if (this.cellRotate[i][j]) {
+	  // セルをコピー
+	  this.cell[i][j] = this.cellRotate[i][j];
+	}
+      }
+    }
+  };
+
+  //----------------------------------------
+  // ブロックの最上段Y位置を取得
+  //----------------------------------------
+  this.getTop = function() {
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// セルが存在する場合
+	if (this.cell[i][j]) {
+	  // セルのY位置を返す
+	  return i;
+	}
+      }
+    }
+    // セルが存在しない場合
+    return null;
+  };
+
+  //----------------------------------------
+  // ブロックの最左X位置を取得
+  //----------------------------------------
+  this.getLeft = function() {
+    // 各セルに対して
+    for (var j = 0; j < this.sizeX; j++) {
+      for (var i = 0; i < this.sizeY; i++) {
+	// セルが存在する場合
+	if (this.cell[i][j]) {
+	  // セルのX位置を返す
+	  return j;
+	}
+      }
+    }
+    // セルが存在しない場合
+    return null;
+  };
+
+  //----------------------------------------
+  // ブロックの最右X位置を取得
+  //----------------------------------------
+  this.getRight = function() {
+    // 各セルに対して
+    for (var j = this.sizeX - 1; j >= 0; j--) {
+      for (var i = 0; i < this.sizeY; i++) {
+	// セルが存在する場合
+	if (this.cell[i][j]) {
+	  // セルのX位置を返す
+	  return j;
+	}
+      }
+    }
+    // セルが存在しない場合
+    return null;
+  };
+
+  //----------------------------------------
+  // 回転可能かチェック
+  //----------------------------------------
+  this.canRotate = function() {
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルが存在する場合
+	if (this.cellRotate[i][j]) {
+	  // フィールドオブジェクトにセルがあるか確認
+	  if (game.field.isExist(i + this.posY, j + this.posX)) {
+	    // 存在する場合は不可
+	    return false;
+	  }
+	}
+      }
+    }
+    // 全てのチェックを通り抜けた場合は可能
+    return true;
+  };
+
+  //----------------------------------------
+  // 移動可能かチェック
+  // 引数: 左上位置(オフセット)y, x
+  //----------------------------------------
+  this.canShift = function(y, x) {
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルが存在する場合
+	if (this.cell[i][j]) {
+	  // フィールドオブジェクトにセルがあるか確認
+	  if (game.field.isExist(i + this.posY + y, j + this.posX + x)) {
+	    // 存在する場合は不可
+	    return false;
+	  }
+	}
+      }
+    }
+    // 全てのチェックを通り抜けた場合は可能
+    return true;
+  };
+
+  //----------------------------------------
+  // ブロックをフィールドに固定
+  //----------------------------------------
+  this.fixing = function() {
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルが存在する場合
+	if (this.cell[i][j]) {
+	  // コピー
+	  game.field.cell[i + this.posY][j + this.posX]
+		= this.cell[i][j];
+	}
+      }
+    }
+  };
+}
+
+
+//========================================
+// フィールドオブジェクト
+//========================================
+function Field() {
+  // X軸・Y軸サイズ
+  this.sizeX;
+  this.sizeY;
+  // セル
+  this.cell;
+  // セルのサイズ(pixcel)
+  this.sizeCell;
+  // フィールド幅・高さ
+  this.width;
+  this.height;
+  // 左上位置
+  this.posX;
+  this.posY;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // X軸・Y軸サイズ
+    this.sizeX = game.sizeX;
+    this.sizeY = game.sizeY;
+
+    // セルのサイズ(画面の大きさとブロック数から計算)
+    this.sizeCell = Math.floor(
+	Math.min(game.width / this.sizeX, game.height * 0.9 / this.sizeY));
+
+    // フィールド幅・高さ
+    this.width = this.sizeX * this.sizeCell;
+    this.height = this.sizeY * this.sizeCell;
+
+    // 左上位置の計算
+    this.posX = game.width / 2 - this.width / 2;
+    this.posY = game.height / 2 - this.height / 2 + game.height * 0.1 / 2;
+
+    // セル配列の作成
+    this.cell = new Array(this.sizeY);
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      this.cell[i] = new Array(this.sizeX);
+      // さらに各セルに対して
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルを初期化
+	this.cell[i][j] = null;
+      }
+    }
+  };
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // セーブ
+    ctx.save();
+    // 軸変換
+    ctx.translate(this.posX, this.posY);
+    // 枠
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, this.height);
+    ctx.lineTo(this.width, this.height);
+    ctx.lineTo(this.width, 0);
+    ctx.stroke();
+
+    // 各セルに対して
+    for (var i = 0; i < this.sizeY; i++) {
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルが存在する場合
+	if (this.cell[i][j]) {
+	  // セルを描画
+	  this.drawCell(i, j, this.cell[i][j].color);
+	}
+      }
+    }
+
+    // リストア
+    ctx.restore();
+  };
+
+  //----------------------------------------
+  // セルを描画
+  // 引数: フィールドのセルの位置と色
+  //----------------------------------------
+  this.drawCell = function(i, j, color) {
+    // 位置を計算
+    var x = j * this.sizeCell;
+    var y = i * this.sizeCell;
+    // 色設定
+    ctx.fillStyle = color;
+    // 塗りつぶす
+    ctx.fillRect(x, y, this.sizeCell, this.sizeCell);
+    // セルの枠線
+    ctx.strokeRect(x, y, this.sizeCell, this.sizeCell);
+    // セルの内側にブロックっぽく見える線
+    ctx.strokeRect(x + this.sizeCell * 0.2,
+		   y + this.sizeCell * 0.2,
+		   this.sizeCell * 0.6,
+		   this.sizeCell * 0.6);
+  };
+
+  //----------------------------------------
+  // セルの存在確認
+  // 引数: フィールドのセルの位置
+  //----------------------------------------
+  this.isExist = function(y, x) {
+    // 最上段の場合
+    if (y < 0) {
+      // 上壁は存在しないとする
+      return null;
+    }
+    // 範囲外の場合
+    if (this.sizeY <= y
+     || x < 0 || this.sizeX <= x) {
+	// 壁が存在
+	return true;
+    }
+    // それ以外の場合セルを返す
+    return this.cell[y][x];
+  };
+
+  //----------------------------------------
+  // ラインチェック
+  //----------------------------------------
+  this.checkLines = function() {
+    // チェック開始Y軸位置
+    var startY = Math.max(game.blocks.list[0].posY, 0);
+    // チェック終了Y軸位置
+    var endY = Math.min(startY + game.blocks.list[0].sizeY, this.sizeY);
+    // 全て埋まっているフラグ
+    var check;
+    // 今回消した行数
+    var line = 0;
+
+    // 各行に対して
+    for (var i = startY; i < endY; i++) {
+      // フラグを初期値にセット
+      check = true;
+      // ラインの各セルに対して
+      for (var j = 0; j < this.sizeX; j++) {
+        // セルが存在しない場合
+	if (!this.isExist(i, j)) {
+	  // フラグをセット
+	  check = false;
+	  // 処理終了
+	  break;
+	}
+      }
+      // 全て埋まっている場合
+      if (check) {
+	// 行削除
+	this.deleteLine(i);
+	// 消した行数をカウントアップ
+	line++;
+      }
+    }
+
+    // 1-3行消し
+    if (0 < line && line < 4) {
+      // 音再生
+      game.play('deleteLine');
+    // 全消し
+    } else if (line >= 4) {
+      // 音再生
+      game.play('deleteLine4');
+    }
+  };
+
+  //----------------------------------------
+  // 行削除
+  // 引数: 行番号
+  //----------------------------------------
+  this.deleteLine = function(posY) {
+    // 各セルに対して
+    for (var i = posY; i > 0; i--) {
+      for (var j = 0; j < this.sizeX; j++) {
+	// 1段上のセルを1つずつコピーする
+	this.cell[i][j] = this.cell[i - 1][j];
+      }
+    }
+    // 最上段(0)はnullで埋める
+    for (var j = 0; j < this.sizeX; j++) {
+      this.cell[0][j] = null;
+    }
+    // 消した行数をカウントアップ
+    game.lines++;
+  };
+}
+
+
+//========================================
+// ゲームオブジェクト
+//========================================
+function Game() {
+  // 幅と高さ
+  this.width;
+  this.height;
+  // X軸・Y軸サイズ
+  this.sizeX = 10;
+  this.sizeY = 20;
+  // タイマーID
+  this.cmTID;
+  // タイムステップ(ミリセカンド)
+  this.timeStep = 50;
+  // フレームレート(fps)
+  this.frameRate = 1000 / this.timeStep;
+  // 消した行数
+  this.lines = 0;
+  // オブジェクト
+  this.field = null;
+  this.blocks = null;
+  // ゲームオーバー
+  this.gameOver = false;
+  // スピード(値が小さいほど速い)
+  this.speed = this.frameRate;
+  // 時間カウンタ
+  this.countTime = 0;
+  // 音再生
+  this.sound;
+  // 落下させる
+  this.gravity;
+  // ネクストブロック数
+  this.maxNext = 1;
+
+  //----------------------------------------
+  // 初期化
+  //----------------------------------------
+  this.init = function() {
+    // 消した行数
+    this.lines = 0;
+    // ゲームオーバー
+    this.gameOver = false;
+    // スピード(値が小さいほど速い)
+    this.speed = this.frameRate;
+    // 時間カウンタ
+    this.countTime = 0;
+
+    // 幅と高さ
+    this.width = ctx.canvas.width;
+    this.height = ctx.canvas.height;
+
+    // フィールドオブジェクト
+    this.field = new Field();
+    this.field.init();
+    // ブロック管理オブジェクト
+    this.blocks = new Blocks();
+    this.blocks.init();
+  }
+
+  //----------------------------------------
+  // 動き計算
+  //----------------------------------------
+  this.move = function() {
+    // ブロック移動
+    this.blocks.move();
+
+    // 落下させる場合
+    if (this.gravity) {
+      // 時間カウントアップ
+      this.countTime++;
+      if ((this.countTime % this.speed) == 0) {
+	// オーバーフローしないように初期化
+	this.countTime = 0;
+	// 下移動
+	this.blocks.shift(1, 0);
+	// スピード計算
+	this.speed = Math.max(1,
+		Math.ceil(this.frameRate - 2 * Math.sqrt(this.lines)) );
+      }
+    }
+  };
+
+  //----------------------------------------
+  // テキスト描画
+  //----------------------------------------
+  this.drawText = function() {
+    // 文字色
+    ctx.fillStyle = 'black';
+    // 消した行数
+    ctx.fillText('lines: ' + this.lines,
+		 this.width * 0.03, this.height * 0.03);
+    // デバッグモードの場合
+    if ((typeof debug_mode) != 'undefined') {
+      var text = 'debug_mode: ';
+      ctx.fillText(text, 10, 10);
+    }
+    // ゲームオーバー
+    if (this.gameOver) {
+      ctx.save();
+      ctx.font = '48pt sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'red';
+      ctx.fillText('GAME OVER', this.width / 2, this.height / 2, this.width);
+      ctx.strokeText('GAME OVER', this.width / 2, this.height / 2, this.width);
+      ctx.restore();
+      // 音再生
+      game.play('gameOver');
+    }
+  };
+
+  //----------------------------------------
+  // 描画
+  //----------------------------------------
+  this.draw = function() {
+    // 画面クリア
+    ctx.clearRect(0, 0, this.width, this.height);
+    // フィールド描画
+    this.field.draw();
+    // ブロック描画
+    this.blocks.draw();
+    // テキスト描画
+    this.drawText();
+  };
+
+  //----------------------------------------
+  // 音再生
+  // 引数: タグID
+  //----------------------------------------
+  this.play = function(id) {
+    // 音再生しない場合
+    if (!this.sound) {
+      // 何もしない
+      return;
+    }
+
+    // ID取得
+    var element = document.getElementById(id);
+
+    // 停止していない場合
+    if (!element.paused) {
+      // 停止
+      element.pause();
+      // 最初から
+      element.currentTime = 0;
+    }
+    // 再生
+    element.play();
+  };
+
+  //----------------------------------------
+  // 全て更新
+  //----------------------------------------
+  this.updateAll = function() {
+    // setTimeoutで呼び出されるためthisではないことに注意
+
+    // 動き計算
+    game.move();
+    // 描画
+    game.draw();
+
+    // タイマークリア
+    clearTimeout(game.cmTID);
+    // ゲームオーバーでない場合
+    if (!game.gameOver) {
+      game.cmTID = setTimeout(game.updateAll, game.timeStep);
+    }
+  };
+
+  //----------------------------------------
+  // 設定
+  //----------------------------------------
+  this.setting = function() {
+    // ブロック横数
+    var sizeX = Number(document.getElementById('sizeX').value);
+    // 0より大きい場合
+    if (sizeX > 0) {
+      // 設定
+      this.sizeX = sizeX;
+    // その他の場合
+    } else {
+      // 表示を元に戻す
+      document.getElementById('sizeX').value = this.sizeX;
+    }
+
+    // ブロック縦数
+    var sizeY = Number(document.getElementById('sizeY').value);
+    // 0より大きい場合
+    if (sizeY > 0) {
+      // 設定
+      this.sizeY = sizeY;
+    // その他の場合
+    } else {
+      // 表示を元に戻す
+      document.getElementById('sizeY').value = this.sizeY;
+    }
+
+    // ネクストブロック数
+    var maxNext = Number(document.getElementById('maxNext').value);
+    // 0より大きい場合
+    if (maxNext > 0) {
+      // 設定
+      this.maxNext = maxNext;
+    // その他の場合
+    } else {
+      // 表示を元に戻す
+      document.getElementById('maxNext').value = this.maxNext;
+    }
+
+    // ウィンドウに合わせる
+//    if (document.getElementById('fit').checked) {
+      // 幅と高さの調整
+      ctx.canvas.width = window.innerWidth - 10;
+      ctx.canvas.height = window.innerHeight - 80;
+//    }
+
+    // 音再生
+    this.turnSound();
+
+    // 落下させる
+    this.turnGravity();
+  };
+
+  //----------------------------------------
+  // 音再生
+  //----------------------------------------
+  this.turnSound = function() {
+    // 
+    this.sound =document.getElementById('sound').checked;
+
+    // 戻り値
+    return false;
+  };
+
+  //----------------------------------------
+  // 落下させる
+  //----------------------------------------
+  this.turnGravity = function() {
+    // 
+    this.gravity =document.getElementById('gravity').checked;
+
+    // 戻り値
+    return false;
+  };
+
+  //----------------------------------------
+  // リスタート
+  //----------------------------------------
+  this.restart = function() {
+    // 設定
+    this.setting();
+    // 初期化
+    this.init();
+    // 実行
+    this.updateAll();
+
+    // 戻り値
+    return false;
+  };
+}
+
+
+//========================================
+// イベント
+//========================================
+// キーボードを押した時
+function keyDown(evt) {
+  // 左矢印・aキー
+  if (evt.keyCode == 37 || evt.keyCode == 65) {
+    game.blocks.left = true;
+    evt.preventDefault();
+  }
+  // 上矢印
+  if (evt.keyCode == 38) {
+    game.blocks.rotL = true;
+    evt.preventDefault();
+  }
+  // wキー
+  if (evt.keyCode == 87) {
+    game.blocks.rotR = true;
+    evt.preventDefault();
+  }
+  // 右矢印・dキー
+  if (evt.keyCode == 39 || evt.keyCode == 68) {
+    game.blocks.right = true;
+    evt.preventDefault();
+  }
+  // 下矢印・sキー
+  if (evt.keyCode == 40 || evt.keyCode == 83) {
+    game.blocks.down = true;
+    evt.preventDefault();
+  }
+};
+
+// キーボードを離した時
+function keyUp(evt) {
+  // 左矢印・aキー
+  if (evt.keyCode == 37 || evt.keyCode == 65) {
+    game.blocks.left = false;
+    evt.preventDefault();
+  }
+  // 上矢印
+  if (evt.keyCode == 38) {
+    game.blocks.rotL = false;
+    evt.preventDefault();
+  }
+  // wキー
+  if (evt.keyCode == 87) {
+    game.blocks.rotR = false;
+    evt.preventDefault();
+  }
+  // 右矢印・dキー
+  if (evt.keyCode == 39 || evt.keyCode == 68) {
+    game.blocks.right = false;
+    evt.preventDefault();
+  }
+  // 下矢印・sキー
+  if (evt.keyCode == 40 || evt.keyCode == 83) {
+    game.blocks.down = false;
+    evt.preventDefault();
+  }
+  // escキー
+  if (evt.keyCode == 27) {
+    game.gameOver = true;
+    evt.preventDefault();
+  }
+};
+
+
+//========================================
+// メイン
+//========================================
+function main() {
+  // キャンバスのコンテキスト
+  ctx = document.getElementById('pane').getContext('2d');
+
+  // オブジェクト生成
+  game = new Game();
+  // 設定
+  game.setting();
+  // 初期化
+  game.init();
+
+  // イベント登録
+  window.addEventListener('keydown', keyDown, false);
+  window.addEventListener('keyup', keyUp, false);
+
+  // 実行
+  game.updateAll();
+}
+
+//========================================
+// ページがロードされたときに実行
+//========================================
+window.addEventListener('load', main, false);
+
+</script>
+</body>
+</html>
